@@ -66,6 +66,19 @@ class FieldClimateStationLink(StationLink):
     class Meta:
         verbose_name = _("FieldClimate Station Link")
         verbose_name_plural = _("FieldClimate Station Links")
+    
+    def get_variable_mappings(self):
+        """
+        Returns the variable mappings for this station link.
+        """
+        return self.variable_mappings.all()
+    
+    def get_first_collection_date(self):
+        """
+        Returns the first collection date for this station link.
+        Returns None if no start date is set.
+        """
+        return self.start_date
 
 
 class FieldClimateStationLinkVariableMapping(Orderable):
