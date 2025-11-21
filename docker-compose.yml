@@ -1,0 +1,90 @@
+# MAKE SURE YOU HAVE SET THE REQUIRED VARIABLES IN the .env FILE.configs:
+
+# This compose file starts up a dev version of the plugin with hot code reloading.
+# It is accessible at http://localhost .
+
+x-adl-variables: &adl-variables
+  DATABASE_URL: postgis://${ADL_DB_USER:-adl}:${ADL_DB_PASSWORD}@adl_db:5432/${ADL_DB_NAME:-adl}
+  REDIS_URL: redis://adl_redis:6379/0
+  PLUGIN_RUNTIME_SETUP_MARKER: 0
+  WAIT_TIMEOUT: 120
+
+services:
+  adl_db:
+    image: timescale/timescaledb-ha:pg15
+    container_name: adl-fieldclimate-plugin-db
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${ADL_DB_USER:-adl}
+      - POSTGRES_DB=${ADL_DB_NAME:-adl}
+      - POSTGRES_PASSWORD=${ADL_DB_PASSWORD:-?}
+    ports:
+      - "5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  adl_redis:
+    image: redis:alpine
+
+  adl:
+    image: adl-fieldclimate-plugin_dev
+    container_name: adl-fieldclimate-plugin
+    build:
+      context: .
+      dockerfile: ./dev.Dockerfile
+      args:
+        - PLUGIN_BUILD_UID=${PLUGIN_BUILD_UID}
+        - PLUGIN_BUILD_GID=${PLUGIN_BUILD_GID}
+    ports:
+      - "${PORT:-8080}:8000"
+    env_file:
+      - .env
+    environment:
+      <<: *adl-variables
+      WAIT_HOSTS: adl_db:5432,adl_redis:6379
+    depends_on:
+      - adl_db
+      - adl_redis
+    volumes:
+      - ./plugins/adl_fieldclimate_plugin:/adl/plugins/adl_fieldclimate_plugin
+    # Open stdin and tty so when attaching key input works as expected.
+    tty: true              # enables terminal support
+    stdin_open: true       # allows interactive input
+
+  adl_celery_worker:
+    image: adl-fieldclimate-plugin_dev
+    command: celery-worker
+    container_name: adl-fieldclimate-plugin-worker
+    env_file:
+      - .env
+    environment:
+      <<: *adl-variables
+      WAIT_HOSTS: adl_db:5432,adl_redis:6379,adl:8000
+    depends_on:
+      - adl
+    volumes:
+      - ./plugins/adl_fieldclimate_plugin:/adl/plugins/adl_fieldclimate_plugin
+    # Open stdin and tty so when attaching key input works as expected.
+    stdin_open: true
+    tty: true
+
+  adl_celery_beat:
+    image: adl-fieldclimate-plugin_dev
+    container_name: adl-fieldclimate-plugin-beat
+    command: celery-beat
+    env_file:
+      - .env
+    environment:
+      <<: *adl-variables
+      WAIT_HOSTS: adl_db:5432,adl_redis:6379,adl:8000
+    depends_on:
+      - adl
+    volumes:
+      - ./plugins/adl_fieldclimate_plugin:/adl/plugins/adl_fieldclimate_plugin
+    # Open stdin and tty so when attaching key input works as expected.
+    stdin_open: true
+    tty: true
+
+volumes:
+  pgdata:
