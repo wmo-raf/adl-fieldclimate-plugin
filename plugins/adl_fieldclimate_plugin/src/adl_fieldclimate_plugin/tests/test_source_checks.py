@@ -17,6 +17,7 @@ import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 import requests
 from adl.core.source_checks import SourceCheckResult, SourceCheckStatus
@@ -64,6 +65,7 @@ class FakeAPIClient:
         self.sensors = sensors if sensors is not None else []
         self.error = error
         self.hourly = hourly
+        self.hourly_calls = []
 
     def get_user_stations(self):
         if self.error is not None:
@@ -76,6 +78,8 @@ class FakeAPIClient:
         return self.sensors
 
     def get_station_hourly_data(self, station_id, start_date=None, end_date=None):
+        self.hourly_calls.append({"station_id": station_id, "start_date": start_date,
+                                  "end_date": end_date})
         if self.error is not None:
             raise self.error
         return self.hourly
@@ -309,6 +313,31 @@ class CheckStationSourceTests(SimpleTestCase):
     def test_core_detects_the_override(self):
         from adl.core.source_checks import station_link_implements_check_station_source
         self.assertTrue(station_link_implements_check_station_source(make_station_link()))
+
+
+class IngestionWindowTests(SimpleTestCase):
+    """Core hands the window over in the station's timezone; the client reads
+    the bounds as UTC, so they have to be converted, not relabelled."""
+
+    def collect(self, start, end):
+        client = FakeAPIClient(hourly=([], 0))
+        patcher, _calls = stub_api_client(client)
+        with patcher:
+            FieldClimatePlugin().get_station_data(make_station_link(), start, end)
+        return client.hourly_calls[0]
+
+    def test_a_local_window_is_sent_as_utc_instants(self):
+        nairobi = ZoneInfo("Africa/Nairobi")
+        call = self.collect(datetime(2026, 8, 1, 13, 0, tzinfo=nairobi),
+                            datetime(2026, 8, 1, 14, 0, tzinfo=nairobi))
+        self.assertEqual(call["start_date"], "2026-08-01T10:00:00Z")
+        self.assertEqual(call["end_date"], "2026-08-01T11:00:00Z")
+
+    def test_a_utc_window_is_unchanged(self):
+        call = self.collect(datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc),
+                            datetime(2026, 8, 1, 11, 0, tzinfo=timezone.utc))
+        self.assertEqual(call["start_date"], "2026-08-01T10:00:00Z")
+        self.assertEqual(call["end_date"], "2026-08-01T11:00:00Z")
 
 
 class SourcesCountTests(SimpleTestCase):
